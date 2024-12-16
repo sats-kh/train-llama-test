@@ -25,13 +25,15 @@ for MACHINE in "${!MACHINES[@]}"; do
     for ((GPU_ID=0; GPU_ID<$NUM_GPUS; GPU_ID++)); do
         echo "Launching on $MACHINE_IP:$MACHINE_PORT GPU $GPU_ID with rank $CURRENT_RANK"
 
-        ssh -p $MACHINE_PORT kh@$MACHINE_IP "nohup python -m torch.distributed.launch \
-            --nproc_per_node=1 \
-            --nnodes=5 \
-            --node_rank=$((CURRENT_RANK / NUM_GPUS)) \
-            --master_addr=$MASTER_ADDR \
-            --master_port=$MASTER_PORT \
-            /home/kh/gpuc/train-llama-test/train.py --local_rank=$GPU_ID &" &
+        ssh -p $MACHINE_PORT kh@$MACHINE_IP "
+            source /home/kh/gpuc/train-llama-test/llama-venv/bin/activate && \
+            nohup python -m torch.distributed.launch \
+                --nproc_per_node=1 \
+                --nnodes=5 \
+                --node_rank=$((CURRENT_RANK / NUM_GPUS)) \
+                --master_addr=$MASTER_ADDR \
+                --master_port=$MASTER_PORT \
+                /home/kh/gpuc/train-llama-test/train.py --local_rank=$GPU_ID &" &
 
         # 글로벌 랭크 증가
         ((CURRENT_RANK++))
