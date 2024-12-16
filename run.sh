@@ -27,13 +27,13 @@ for MACHINE in "${!MACHINES[@]}"; do
 
         ssh -p $MACHINE_PORT kh@$MACHINE_IP "
             source /home/kh/gpuc/train-llama-test/llama-venv/bin/activate && \
-            nohup python -m torch.distributed.launch \
+            nohup torchrun \
                 --nproc_per_node=1 \
                 --nnodes=5 \
                 --node_rank=$((CURRENT_RANK / NUM_GPUS)) \
                 --master_addr=$MASTER_ADDR \
                 --master_port=$MASTER_PORT \
-                /home/kh/gpuc/train-llama-test/train.py --local_rank=$GPU_ID &" &
+                /home/kh/gpuc/train-llama-test/train.py &" &
 
         # 글로벌 랭크 증가
         ((CURRENT_RANK++))
