@@ -9,7 +9,7 @@ WORLD_SIZE=17
 declare -A MACHINES=(
     ["147.47.122.200:3298"]=1
     ["147.47.122.200:9944"]=2
-    ["147.47.122.200:9933"]=2
+    ["gpu.bigdata.re.kr:9922"]=2
     ["gpu1.bigdata.re.kr:9922"]=4
     ["gpu2.bigdata.re.kr:9922"]=8
 )
