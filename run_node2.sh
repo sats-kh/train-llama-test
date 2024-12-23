@@ -9,7 +9,7 @@ NUM_GPUS=2
 for ((GPU_ID=0; GPU_ID<$NUM_GPUS; GPU_ID++)); do
     echo "Launching on NODE-2 GPU $GPU_ID"
 
-    source /home/kh/gpuc/train-llama-test/llama-venv/bin/activate
+    source /home/kh/train-llama-test/llama-venv/bin/activate
     nohup torchrun \
         --nproc_per_node=1 \
         --nnodes=5 \

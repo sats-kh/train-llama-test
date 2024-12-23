@@ -45,7 +45,7 @@ def main():
     for epoch in range(3):
         model.train()
         for batch in train_loader:
-            inputs = {k: torch.stack([b[k].squeeze() for b in batch]).cuda(local_rank) for k in batch[0].keys()}
+            inputs = {k: torch.stack([b[k].squeez@e() for b in batch]).cuda(local_rank) for k in batch[0].keys()}
             outputs = model(**inputs)
             loss = outputs.loss
 
