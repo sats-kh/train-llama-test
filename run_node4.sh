@@ -26,6 +26,8 @@ fi
 echo "Launching training on node_rank=$NODE_RANK with $NUM_GPUS GPUs"
 echo "Master Address: $MASTER_ADDR, Master Port: $MASTER_PORT, World Size: $WORLD_SIZE"
 
+# OMP_NUM_THREADS =  num_cores / nproc_per_node
+export OMP_NUM_THREADS=8
 # Run Torch Distributed Training
 nohup torchrun \
     --nproc_per_node=$NUM_GPUS \
