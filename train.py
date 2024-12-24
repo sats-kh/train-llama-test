@@ -52,6 +52,7 @@ def main():
     # Enable gradient checkpointing before DDP wrapping
     model.gradient_checkpointing_enable()
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    model.gradient_checkpointing_enable()
 
     # Rest of your code remains the same...
     dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train", streaming=True)
