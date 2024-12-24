@@ -47,4 +47,4 @@ torchrun \
     --node_rank=$NODE_RANK \
     --master_addr=$MASTER_ADDR \
     --master_port=$MASTER_PORT \
-    /home/kh/llama/train-llama-test/train2.py 2>&1 | tee train_node_${NODE_RANK}.log
+    /home/kh/llama/train-llama-test/train.py 2>&1 | tee train_node_${NODE_RANK}.log
