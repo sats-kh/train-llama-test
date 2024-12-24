@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_data_collator
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
@@ -9,13 +10,16 @@ MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 DATASET_NAME = "wikitext"
 DATASET_SPLIT = "wikitext-2-raw-v1"
 
+
 def main():
-    # Get environment variables for distributed training
+    # These are set by torchrun automatically
     world_size = int(os.getenv("WORLD_SIZE", 1))
     rank = int(os.getenv("RANK", 0))
     local_rank = int(os.getenv("LOCAL_RANK", 0))
 
-    # Initialize the process group
+    # Print debug information
+    print(f"Starting process with rank {rank}, local_rank {local_rank}, world_size {world_size}")
+
     try:
         dist.init_process_group(
             backend="nccl",
@@ -27,22 +31,24 @@ def main():
         print(f"Failed to initialize process group: {e}")
         exit(1)
 
-    # Set the local GPU device
     torch.cuda.set_device(local_rank)
 
-    # Load tokenizer and model with mixed precision and device mapping
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    # Modified model loading - remove device_map="auto" since we're using DDP
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
-        device_map="auto",
-        torch_dtype=torch.float16
-    )
-    model.gradient_checkpointing_enable()
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True
+    ).to(f"cuda:{local_rank}")
 
-    # Load dataset
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+    # Enable gradient checkpointing before DDP wrapping
+    model.gradient_checkpointing_enable()
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+
+    # Rest of your code remains the same...
     dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train")
 
-    # Preprocess dataset
     def encode(batch):
         inputs = tokenizer(
             batch["text"],
@@ -55,37 +61,34 @@ def main():
 
     encoded_dataset = dataset.map(encode, batched=True, remove_columns=["text"])
     train_loader = torch.utils.data.DataLoader(
-        encoded_dataset, batch_size=1, shuffle=True, collate_fn=default_data_collator, pin_memory=True
+        encoded_dataset,
+        batch_size=1,
+        shuffle=True,
+        collate_fn=default_data_collator,
+        pin_memory=True
     )
 
-    # Prepare optimizer and scaler
     optimizer = AdamW(model.parameters(), lr=5e-5)
     scaler = GradScaler()
 
-    # Training loop
     for epoch in range(3):
         model.train()
         for step, batch in enumerate(train_loader):
-            # Move batch to the appropriate device
-            inputs = {k: v.to(local_rank) for k, v in batch.items()}
-
-            # Forward pass with mixed precision
+            inputs = {k: torch.stack([b[k] for b in batch]).to(local_rank) for k in batch[0].keys()}
             with autocast():
                 outputs = model(**inputs)
                 loss = outputs.loss
 
-            # Backward pass and optimization
             optimizer.zero_grad()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            # Log progress
             if step % 10 == 0 and dist.get_rank() == 0:
                 print(f"Epoch {epoch}, Step {step}, Loss: {loss.item()}")
 
-    # Clean up
     dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()
