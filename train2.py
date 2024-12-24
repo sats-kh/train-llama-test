@@ -24,7 +24,7 @@ def setup_distributed():
     try:
         dist.init_process_group(
             backend="nccl",
-            init_method="env://210.125.67.55:1234",  # 실제 마스터 노드 IP로 변경
+            init_method="tcp://210.125.67.55:1234",  # 실제 마스터 노드 IP로 변경
             world_size=world_size,
             rank=rank
         )
