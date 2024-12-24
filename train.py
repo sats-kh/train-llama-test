@@ -23,27 +23,21 @@ def main():
     try:
         dist.init_process_group(
             backend="gloo",
-            init_method="env://210.125.67.55:1234",
+            init_method="tcp://210.125.67.55:1234",
             world_size=world_size,
             rank=rank
         )
+        print(f"GPU Cluster {os.getenv('RANK')} initialized!")
     except Exception as e:
         print(f"Failed to initialize process group: {e}")
         exit(1)
 
     torch.cuda.set_device(local_rank)
 
-    # Configure 8-bit quantization
-    quantization_config = BitsAndBytesConfig(
-        load_in_8bit=True,  # Enable 8-bit quantization
-        llm_int8_enable_fp32_cpu_offload=True  # Offload FP32 calculations to CPU
-    )
-
     # Modified model loading - remove device_map="auto" since we're using DDP
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
-        # quantization_config=quantization_config,
         low_cpu_mem_usage=True
     ).to(f"cuda:{local_rank}")
 

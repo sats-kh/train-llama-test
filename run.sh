@@ -1,43 +1,42 @@
 #!/bin/bash
 
-# 마스터 노드 설정
-MASTER_ADDR="147.47.122.200"
+# Distributed Training Configuration
+MASTER_ADDR="210.125.67.55"  # 실제 마스터 노드 IP로 변경
 MASTER_PORT=1234
-WORLD_SIZE=17
+WORLD_SIZE=18  # 총 GPU 수
+NUM_GPUS=4     # 노드당 GPU 수
+NODE_RANK=$1   # 실행 시 인자로 받음
+NODES=3        # 총 노드 수
 
-# 머신 별 GPU 수 설정
-declare -A MACHINES=(
-    ["147.47.122.200:3298"]=1
-    ["147.47.122.200:9944"]=2
-    ["gpu.bigdata.re.kr:9922"]=2
-    ["gpu1.bigdata.re.kr:9922"]=4
-    ["gpu2.bigdata.re.kr:9922"]=8
-)
+# Environment Setup
+VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
 
-# 현재 글로벌 랭크 트래킹 변수
-CURRENT_RANK=0
+if [ ! -d "$VENV_PATH" ]; then
+    echo "Virtual environment not found at $VENV_PATH. Exiting."
+    exit 1
+fi
 
-# 모든 머신에서 학습 실행
-for MACHINE in "${!MACHINES[@]}"; do
-    NUM_GPUS=${MACHINES[$MACHINE]}
-    IFS=":" read -r MACHINE_IP MACHINE_PORT <<< "$MACHINE"
+source "$VENV_PATH/bin/activate"
 
-    for ((GPU_ID=0; GPU_ID<$NUM_GPUS; GPU_ID++)); do
-        echo "Launching on $MACHINE_IP:$MACHINE_PORT GPU $GPU_ID with rank $CURRENT_RANK"
+# Verify Master Node Connectivity
+if ! ping -c 1 $MASTER_ADDR &>/dev/null; then
+    echo "Cannot reach master node at $MASTER_ADDR. Exiting."
+    exit 1
+fi
 
-        ssh -p $MACHINE_PORT kh@$MACHINE_IP "
-            source /home/kh/gpuc/train-llama-test/llama-venv/bin/activate && \
-            nohup torchrun \
-                --nproc_per_node=1 \
-                --nnodes=5 \
-                --node_rank=$((CURRENT_RANK / NUM_GPUS)) \
-                --master_addr=$MASTER_ADDR \
-                --master_port=$MASTER_PORT \
-                /home/kh/gpuc/train-llama-test/train.py &" &
+echo "Launching training on node_rank=$NODE_RANK with $NUM_GPUS GPUs"
+echo "Master Address: $MASTER_ADDR, Master Port: $MASTER_PORT, World Size: $WORLD_SIZE"
 
-        # 글로벌 랭크 증가
-        ((CURRENT_RANK++))
-    done
-done
+# Set environment variables
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export CUDA_LAUNCH_BLOCKING=1
+export OMP_NUM_THREADS=10
 
-wait
+# Run Torch Distributed Training
+torchrun \
+    --nproc_per_node=$NUM_GPUS \
+    --nnodes=$NODES \
+    --node_rank=$NODE_RANK \
+    --master_addr=$MASTER_ADDR \
+    --master_port=$MASTER_PORT \
+    /home/kh/llama/train-llama-test/train2.py 2>&1 | tee train_node_${NODE_RANK}.log
