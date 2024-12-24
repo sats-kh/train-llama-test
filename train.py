@@ -6,7 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_dat
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
 
-MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
+MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct"
 DATASET_NAME = "wikitext"
 DATASET_SPLIT = "wikitext-2-raw-v1"
 

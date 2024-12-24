@@ -37,7 +37,7 @@ torchrun \
     --node_rank=$NODE_RANK \
     --master_addr=$MASTER_ADDR \
     --master_port=$MASTER_PORT \
-    /home/kh/llama/train-llama-test/train.py
+    /home/kh/llama/train-llama-test/train.py 2>&1 | tee train_node_${NODE_RANK}.log
     #/home/kh/llama/train-llama-test/train.py > train_node_${NODE_RANK}.log 2>&1 &
 
 echo "Training process launched. Check train_node_${NODE_RANK}.log for logs."
