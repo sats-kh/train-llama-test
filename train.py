@@ -38,7 +38,6 @@ def main():
         MODEL_NAME,
         torch_dtype=torch.float16,
         device_map="balanced",
-        low_cpu_mem_usage=True,
     ).to(f"cuda:{local_rank}")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
