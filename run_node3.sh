@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Distributed Training Configuration
-MASTER_ADDR="147.47.122.200"
+MASTER_ADDR="210.125.67.55"
 MASTER_PORT=1234
-WORLD_SIZE=17
+WORLD_SIZE=18
 NUM_GPUS=4
 NODE_RANK=3 # Default to 1 for slave node
-
+NODES=4
 # Environment Setup
 VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
 
@@ -27,12 +27,12 @@ echo "Launching training on node_rank=$NODE_RANK with $NUM_GPUS GPUs"
 echo "Master Address: $MASTER_ADDR, Master Port: $MASTER_PORT, World Size: $WORLD_SIZE"
 
 # OMP_NUM_THREADS =  num_cores / nproc_per_node
-export OMP_NUM_THREADS=10
+export OMP_NUM_THREADS=16
 
 # Run Torch Distributed Training
 nohup torchrun \
     --nproc_per_node=$NUM_GPUS \
-    --nnodes=5 \
+    --nnodes=$NODES \
     --node_rank=$NODE_RANK \
     --master_addr=$MASTER_ADDR \
     --master_port=$MASTER_PORT \
