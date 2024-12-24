@@ -70,7 +70,16 @@ def main():
         pin_memory=True
     )
 
-    optimizer = AdamW(model.parameters(), lr=5e-5, no_deprecation_warning=True)
+    # optimizer = AdamW(model.parameters(), lr=5e-5, no_deprecation_warning=True)
+    optimizer = AdamW(
+        model.parameters(),
+        lr=5e-5,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0.01,
+        foreach=True,  # 메모리 효율적인 업데이트
+        fused=True  # 퓨즈드 최적화
+    )
     scaler = GradScaler()
 
     for epoch in range(3):
