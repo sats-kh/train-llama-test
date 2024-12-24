@@ -13,7 +13,7 @@ DATASET_SPLIT = "wikitext-2-raw-v1"
 # DeepSpeed configuration
 ds_config = {
     "train_micro_batch_size_per_gpu": 1,
-    "gradient_accumulation_steps": 8,
+    "gradient_accumulation_steps": 4,
     "optimizer": {
         "type": "AdamW",
         "params": {
@@ -63,7 +63,7 @@ def main():
     # Load model with DeepSpeed
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,
         low_cpu_mem_usage=True
     )
 
