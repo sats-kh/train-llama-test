@@ -11,9 +11,8 @@ NODES=3        # 총 노드 수
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=1
 export NCCL_SOCKET_IFNAME=eno1  # 실제 네트워크 인터페이스 이름으로 변경
-export NCCL_IB_GID_INDEX=3
-export NCCL_NET_GDR_LEVEL=2
-
+export NCCL_P2P_DISABLE=1       # P2P 연결 비활성화
+export NCCL_SHM_DISABLE=1
 
 # Environment Setup
 VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
