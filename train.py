@@ -38,6 +38,8 @@ def main():
         MODEL_NAME,
         torch_dtype=torch.float16,
         device_map="auto",
+        offload_folder="./offload",  # 오프로드 데이터를 저장할 디렉터리
+        offload_state_dict=True,
     ).to(f"cuda:{local_rank}")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
