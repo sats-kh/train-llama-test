@@ -2,7 +2,7 @@ import os
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_data_collator
+from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_data_collator, BitsAndBytesConfig
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
 
@@ -33,11 +33,17 @@ def main():
 
     torch.cuda.set_device(local_rank)
 
+    # Configure 8-bit quantization
+    quantization_config = BitsAndBytesConfig(
+        load_in_8bit=True,  # Enable 8-bit quantization
+        llm_int8_enable_fp32_cpu_offload=True  # Offload FP32 calculations to CPU
+    )
+
     # Modified model loading - remove device_map="auto" since we're using DDP
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
-        load_in_8bit=True,
+        quantization_config=quantization_config,
         low_cpu_mem_usage=True
     ).to(f"cuda:{local_rank}")
 
