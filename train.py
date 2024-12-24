@@ -1,7 +1,5 @@
 import os
 import torch
-torch.cuda.empty_cache()
-torch.cuda.reset_peak_memory_stats()
 import torch.distributed as dist
 from transformers import AutoModelForCausalLM, AutoTokenizer, default_data_collator
 from datasets import load_dataset
