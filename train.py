@@ -23,7 +23,7 @@ def main():
     try:
         dist.init_process_group(
             backend="nccl",
-            init_method="tcp://210.125.67.55:1234",
+            init_method="env://210.125.67.55:1234",
             world_size=world_size,
             rank=rank
         )
