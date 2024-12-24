@@ -3,10 +3,10 @@
 # Distributed Training Configuration
 MASTER_ADDR="210.125.67.55"
 MASTER_PORT=1234
-WORLD_SIZE=18
+WORLD_SIZE=10
 NUM_GPUS=2
 NODE_RANK=0 # Default to 0 for master node
-NODES=4
+NODES=3
 # Environment Setup
 VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

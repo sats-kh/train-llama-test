@@ -4,9 +4,9 @@
 MASTER_ADDR="210.125.67.55"
 MASTER_PORT=1234
 WORLD_SIZE=18
-NUM_GPUS=8
-NODE_RANK=2 # Default to 1 for slave node
-NODES=4
+NUM_GPUS=4
+NODE_RANK=3 # Default to 1 for slave node
+NODES=3
 # Environment Setup
 VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
