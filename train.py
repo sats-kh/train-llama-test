@@ -29,7 +29,7 @@ def main():
     torch.cuda.set_device(local_rank)
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto").cuda(local_rank)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto", torch_dtype=torch.float16).cuda(local_rank)
     model.gradient_checkpointing_enable()
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
