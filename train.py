@@ -3,6 +3,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_data_collator
+import bitsandbytes as bnb
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
 
@@ -16,7 +17,11 @@ def main():
     world_size = int(os.getenv("WORLD_SIZE", 1))
     rank = int(os.getenv("RANK", 0))
     local_rank = int(os.getenv("LOCAL_RANK", 0))
-
+    
+    bnb_config = bnb.BnbQuantizationConfig(
+        load_in_8bit=True,  # 8-bit 양자화 활성화
+        llm_int8_enable_fp32_cpu_offload=True  # FP32 계산을 CPU로 오프로드
+    )
     # Print debug information
     print(f"Starting process with rank {rank}, local_rank {local_rank}, world_size {world_size}")
 
@@ -37,6 +42,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
+        quantization_config=bnb_config,
         low_cpu_mem_usage=True
     ).to(f"cuda:{local_rank}")
 
