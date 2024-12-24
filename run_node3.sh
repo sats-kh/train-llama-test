@@ -11,7 +11,7 @@
 #VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
 #export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 #export CUDA_LAUNCH_BLOCKING=1
-#
+#export TORCH_DISTRIBUTED_DEBUG=DETAIL
 #if [ ! -d "$VENV_PATH" ]; then
 #    echo "Virtual environment not found at $VENV_PATH. Exiting."
 #    exit 1
