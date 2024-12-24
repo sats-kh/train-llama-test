@@ -4,7 +4,6 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_data_collator
 from datasets import load_dataset
-from torch.cuda.amp import autocast, GradScaler
 
 MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct"
 DATASET_NAME = "wikitext"
@@ -30,7 +29,6 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto").cuda(local_rank)
-    model.gradient_checkpointing_enable()
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train")
@@ -47,24 +45,21 @@ def main():
 
     encoded_dataset = dataset.map(encode, batched=True, remove_columns=["text"])
     train_loader = torch.utils.data.DataLoader(
-        encoded_dataset, batch_size=1, shuffle=True, collate_fn=default_data_collator, pin_memory=True
+        encoded_dataset, batch_size=1, shuffle=True, collate_fn=default_data_collator
     )
 
     optimizer = AdamW(model.parameters(), lr=5e-5)
-    scaler = GradScaler()
 
     for epoch in range(3):
         model.train()
         for step, batch in enumerate(train_loader):
             inputs = {k: torch.stack([b[k] for b in batch]).to(local_rank) for k in batch[0].keys()}
-            with autocast():
-                outputs = model(**inputs)
-                loss = outputs.loss
+            outputs = model(**inputs)
+            loss = outputs.loss
 
             optimizer.zero_grad()
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            loss.backward()
+            optimizer.step()
 
             if step % 10 == 0 and dist.get_rank() == 0:
                 print(f"Epoch {epoch}, Step {step}, Loss: {loss.item()}")
