@@ -9,6 +9,7 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 from datasets import load_dataset
+from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 OUTPUT_DIR = "./llama-3.1-8b-finetuned"
@@ -24,9 +25,10 @@ def setup_distributed():
     try:
         dist.init_process_group(
             backend="nccl",
-            init_method="tcp://210.125.67.55:1234",  # 실제 마스터 노드 IP로 변경
+            init_method="env://210.125.67.55:1234",  # 실제 마스터 노드 IP로 변경
             world_size=world_size,
-            rank=rank
+            rank=rank,
+            timeout=timedelta(minutes=10)
         )
     except Exception as e:
         print(f"Failed to initialize process group: {e}")
