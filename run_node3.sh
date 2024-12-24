@@ -30,7 +30,7 @@ echo "Master Address: $MASTER_ADDR, Master Port: $MASTER_PORT, World Size: $WORL
 export OMP_NUM_THREADS=16
 
 # Run Torch Distributed Training
-nohup torchrun \
+torchrun \
     --nproc_per_node=$NUM_GPUS \
     --nnodes=$NODES \
     --node_rank=$NODE_RANK \
