@@ -1,5 +1,7 @@
 import os
 import torch
+torch.cuda.empty_cache()
+torch.cuda.reset_peak_memory_stats()
 import torch.distributed as dist
 from transformers import AutoModelForCausalLM, AutoTokenizer, default_data_collator
 from datasets import load_dataset
@@ -13,7 +15,7 @@ DATASET_SPLIT = "wikitext-2-raw-v1"
 # DeepSpeed configuration
 ds_config = {
     "train_micro_batch_size_per_gpu": 1,
-    "gradient_accumulation_steps": 4,
+    "gradient_accumulation_steps": 8,
     "optimizer": {
         "type": "AdamW",
         "params": {
@@ -27,7 +29,7 @@ ds_config = {
         "enabled": True
     },
     "zero_optimization": {
-        "stage": 2,  # ZeRO Stage 2 for optimizer state partitioning
+        "stage": 3,  # ZeRO Stage 2 for optimizer state partitioning
         "offload_optimizer": {
             "device": "cpu",
             "pin_memory": True
@@ -63,7 +65,7 @@ def main():
     # Load model with DeepSpeed
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True
     )
 

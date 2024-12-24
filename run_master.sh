@@ -9,7 +9,7 @@ NODE_RANK=0 # Default to 0 for master node
 NODES=4
 # Environment Setup
 VENV_PATH="/home/kh/llama/train-llama-test/llama-venv"
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:10
 export CUDA_LAUNCH_BLOCKING=1
 
 if [ ! -d "$VENV_PATH" ]; then
