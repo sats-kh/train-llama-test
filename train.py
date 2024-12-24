@@ -37,7 +37,8 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
-        low_cpu_mem_usage=True
+        device_map="balanced",
+        low_cpu_mem_usage=True,
     ).to(f"cuda:{local_rank}")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
