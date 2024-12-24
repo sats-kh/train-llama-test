@@ -1,42 +1,15 @@
 import os
 import torch
 import torch.distributed as dist
-from transformers import AutoModelForCausalLM, AutoTokenizer, default_data_collator
+from torch.nn.parallel import DistributedDataParallel as DDP
+from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, default_data_collator, BitsAndBytesConfig
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
-import deepspeed
 
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 DATASET_NAME = "wikitext"
 DATASET_SPLIT = "wikitext-2-raw-v1"
 
-# DeepSpeed configuration
-ds_config = {
-    "train_micro_batch_size_per_gpu": 1,
-    "gradient_accumulation_steps": 4,
-    "optimizer": {
-        "type": "AdamW",
-        "params": {
-            "lr": 5e-5,
-            "betas": [0.9, 0.999],
-            "eps": 1e-8,
-            "weight_decay": 0.01
-        }
-    },
-    "fp16": {
-        "enabled": True
-    },
-    "zero_optimization": {
-        "stage": 3,  # ZeRO Stage 2 for optimizer state partitioning
-        "offload_optimizer": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "contiguous_gradients": True
-    },
-    "gradient_clipping": 1.0,
-    "steps_per_print": 10
-}
 
 def main():
     # These are set by torchrun automatically
@@ -60,26 +33,27 @@ def main():
 
     torch.cuda.set_device(local_rank)
 
-    # Load model with DeepSpeed
+    # Configure 8-bit quantization
+    quantization_config = BitsAndBytesConfig(
+        load_in_8bit=True,  # Enable 8-bit quantization
+        llm_int8_enable_fp32_cpu_offload=True  # Offload FP32 calculations to CPU
+    )
+
+    # Modified model loading - remove device_map="auto" since we're using DDP
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
+        # quantization_config=quantization_config,
         low_cpu_mem_usage=True
-    )
+    ).to(f"cuda:{local_rank}")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-    # Enable gradient checkpointing for memory efficiency
+    # Enable gradient checkpointing before DDP wrapping
     model.gradient_checkpointing_enable()
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    # Initialize DeepSpeed
-    model_engine, optimizer, _, _ = deepspeed.initialize(
-        model=model,
-        config=ds_config,
-        model_parameters=model.parameters()
-    )
-
-    # Dataset loading
+    # Rest of your code remains the same...
     dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train", streaming=True)
 
     def encode(batch):
@@ -88,7 +62,7 @@ def main():
             return_tensors="pt",
             padding="max_length",
             truncation=True,
-            max_length=512,
+            max_length=256,
             return_attention_mask=True,
             return_token_type_ids=False
         )
@@ -103,20 +77,32 @@ def main():
         pin_memory=True
     )
 
+    # optimizer = AdamW(model.parameters(), lr=5e-5, no_deprecation_warning=True)
+    optimizer = AdamW(
+        model.parameters(),
+        lr=5e-5,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0.01,
+        foreach=True,  # 메모리 효율적인 업데이트
+        fused=True  # 퓨즈드 최적화
+    )
     scaler = GradScaler()
 
     for epoch in range(3):
-        model_engine.train()
+        model.train()
         for step, batch in enumerate(train_loader):
-            inputs = {k: v.cuda(local_rank) for k, v in batch.items()}
+            inputs = {k: torch.stack([b[k] for b in batch]).to(local_rank) for k in batch[0].keys()}
             with autocast():
-                outputs = model_engine(**inputs)
+                outputs = model(**inputs)
                 loss = outputs.loss
 
-            model_engine.backward(loss)
-            model_engine.step()
+            optimizer.zero_grad()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
-            if step % 10 == 0 and rank == 0:
+            if step % 10 == 0 and dist.get_rank() == 0:
                 print(f"Epoch {epoch}, Step {step}, Loss: {loss.item()}")
 
     dist.destroy_process_group()
