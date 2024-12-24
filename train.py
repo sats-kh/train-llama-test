@@ -47,7 +47,7 @@ def main():
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     # Rest of your code remains the same...
-    dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train")
+    dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train", streaming=True)
 
     def encode(batch):
         inputs = tokenizer(
@@ -55,7 +55,9 @@ def main():
             return_tensors="pt",
             padding="max_length",
             truncation=True,
-            max_length=512
+            max_length=256,
+            return_attention_mask=True,
+            return_token_type_ids=False
         )
         return {key: val for key, val in inputs.items()}
 
@@ -68,7 +70,7 @@ def main():
         pin_memory=True
     )
 
-    optimizer = AdamW(model.parameters(), lr=5e-5)
+    optimizer = AdamW(model.parameters(), lr=5e-5, no_deprecation_warning=True)
     scaler = GradScaler()
 
     for epoch in range(3):
