@@ -14,30 +14,6 @@ from datetime import timedelta
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 OUTPUT_DIR = "./llama-3.1-8b-finetuned"
 
-# DeepSpeed ZeRO config
-DEEPSPEED_CONFIG = {
-    "fp16": {
-        "enabled": True
-    },
-    "zero_optimization": {
-        "stage": 3,  # ZeRO Stage 3 for full memory optimization
-        "offload_optimizer": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "offload_param": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "overlap_comm": True,
-        "contiguous_gradients": True
-    },
-    "gradient_accumulation_steps": 8,
-    "train_micro_batch_size_per_gpu": 1,
-    "steps_per_print": 100,
-    "gradient_clipping": 1.0
-}
-
 
 def setup_distributed():
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -49,7 +25,7 @@ def setup_distributed():
     try:
         dist.init_process_group(
             backend="nccl",
-            init_method="env://",
+            init_method="env://210.125.67.55:1234",  # 실제 마스터 노드 IP로 변경
             world_size=world_size,
             rank=rank,
             timeout=timedelta(minutes=10)
@@ -120,7 +96,7 @@ def get_training_arguments(local_rank):
         report_to="tensorboard",
         local_rank=local_rank,
         gradient_checkpointing=True,
-        deepspeed=DEEPSPEED_CONFIG,  # ZeRO Optimization 설정
+        deepspeed=None,  # DeepSpeed config 파일 경로를 지정할 수 있음
         ddp_find_unused_parameters=False
     )
 
