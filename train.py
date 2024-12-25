@@ -11,8 +11,8 @@ from transformers import (
 from datasets import load_dataset
 from datetime import timedelta
 
-MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
-OUTPUT_DIR = "./llama-3.1-8b-finetuned"
+MODEL_NAME = "meta-llama/Llama-3.2-1B"
+OUTPUT_DIR = "./llama-3.2-1b-finetuned"
 
 # DeepSpeed ZeRO config
 DEEPSPEED_CONFIG = {
