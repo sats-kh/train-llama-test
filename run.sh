@@ -3,10 +3,10 @@
 # Distributed Training Configuration
 MASTER_ADDR="210.125.67.55"  # 실제 마스터 노드 IP로 변경
 MASTER_PORT=1234
-WORLD_SIZE=10  # 총 GPU 수
+WORLD_SIZE=18  # 총 GPU 수
 NODE_RANK=$1   # 실행 시 인자로 받음
 NUM_GPUS=$2     # 노드당 GPU 수
-NODES=3        # 총 노드 수
+NODES=4        # 총 노드 수
 
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=1
