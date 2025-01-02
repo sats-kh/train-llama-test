@@ -1,7 +1,11 @@
 import os
 import torch
 import torch.distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, FullStateDictConfig, StateDictType
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    FullStateDictConfig,
+    StateDictType,
+)
 from torch.distributed.fsdp.wrap import auto_wrap_policy
 from transformers import (
     AutoModelForCausalLM,
@@ -56,8 +60,8 @@ def setup_model_and_tokenizer(local_rank):
     model = FSDP(
         model,
         auto_wrap_policy=auto_wrap_policy,
-        mixed_precision=True,  # Enable mixed precision for memory efficiency
-        device_id=torch.cuda.current_device()
+        device_id=local_rank,
+        mixed_precision=torch.float16  # Enable mixed precision for memory efficiency
     )
     return model, tokenizer
 
@@ -101,9 +105,17 @@ def get_training_arguments(local_rank):
         push_to_hub=False,
         save_total_limit=2,
         report_to="tensorboard",
-        local_rank=local_rank,
-        gradient_checkpointing=True,
+        ddp_find_unused_parameters=False,  # FSDP requires this to be False
     )
+
+
+def save_model(model, tokenizer):
+    print("Saving model...")
+    state_dict_config = FullStateDictConfig(offload_to_cpu=True)
+    with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, state_dict_config):
+        state_dict = model.state_dict()
+        torch.save(state_dict, os.path.join(OUTPUT_DIR, "fsdp_model.pt"))
+    tokenizer.save_pretrained(OUTPUT_DIR)
 
 
 def main():
@@ -118,15 +130,6 @@ def main():
         mlm=False
     )
 
-    # Save the model using FSDP state_dict
-    if dist.get_rank() == 0:
-        print("Saving model...")
-        state_dict_config = FullStateDictConfig(offload_to_cpu=True)
-        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, state_dict_config):
-            torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, "fsdp_model.pt"))
-
-        tokenizer.save_pretrained(OUTPUT_DIR)
-
     print("Starting training...")
     trainer = Trainer(
         model=model,
@@ -135,6 +138,9 @@ def main():
         data_collator=data_collator,
     )
     trainer.train()
+
+    if dist.get_rank() == 0:
+        save_model(model, tokenizer)
 
     dist.destroy_process_group()
 
