@@ -10,14 +10,22 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 from datasets import load_dataset
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, MixedPrecision
-from torch.distributed.fsdp.fully_sharded_data_parallel import ActivationCheckpointing
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    CPUOffload,
+    MixedPrecision,
+    StateDictType
+)
+from torch.distributed.fsdp.wrap import (
+    transformer_auto_wrap_policy,
+    enable_wrap,
+    wrap,
+)
 from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B"
 OUTPUT_DIR = "./llama-3.2-3b-fsdp-finetuned"
+
 
 def setup_distributed():
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -41,6 +49,7 @@ def setup_distributed():
     torch.cuda.set_device(local_rank)
     return local_rank
 
+
 def setup_model_and_tokenizer(local_rank):
     print("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -53,14 +62,20 @@ def setup_model_and_tokenizer(local_rank):
         low_cpu_mem_usage=True,
     ).to(f"cuda:{local_rank}")
 
+    # Enable gradient checkpointing
     model.gradient_checkpointing_enable()
 
     # FSDP Wrapping
-    wrap_policy = functools.partial(transformer_auto_wrap_policy, transformer_layer_cls={AutoModelForCausalLM})
+    from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+    wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={LlamaDecoderLayer}
+    )
+
     mixed_precision_policy = MixedPrecision(
-        param_dtype=torch.float16,  # Parameters stored in fp16
-        reduce_dtype=torch.float16,  # Gradients reduced in fp16
-        buffer_dtype=torch.float16  # Buffers stored in fp16
+        param_dtype=torch.float16,
+        reduce_dtype=torch.float16,
+        buffer_dtype=torch.float16
     )
 
     model = FSDP(
@@ -68,9 +83,31 @@ def setup_model_and_tokenizer(local_rank):
         auto_wrap_policy=wrap_policy,
         mixed_precision=mixed_precision_policy,
         cpu_offload=CPUOffload(offload_params=True),
-        activation_checkpointing=ActivationCheckpointing(policy="default")  # Enable activation checkpointing
+        device_id=torch.cuda.current_device(),
     )
+
+    # Enable activation checkpointing after FSDP wrapping
+    from torch.distributed.fsdp import BackwardPrefetch
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+        checkpoint_wrapper,
+        CheckpointImpl,
+    )
+    from functools import partial
+
+    non_reentrant_wrapper = partial(
+        checkpoint_wrapper,
+        checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+    )
+
+    check_fn = lambda submodule: isinstance(submodule, LlamaDecoderLayer)
+    apply_fsdp_wrapper = lambda submodule: wrap(submodule, wrapper_cls=non_reentrant_wrapper)
+
+    model.apply(
+        lambda m: apply_fsdp_wrapper(m) if check_fn(m) else None
+    )
+
     return model, tokenizer
+
 
 def prepare_dataset(tokenizer, max_length=512):
     print("Loading and preparing dataset...")
@@ -95,6 +132,7 @@ def prepare_dataset(tokenizer, max_length=512):
     )
     return tokenized_dataset
 
+
 def get_training_arguments(local_rank):
     return TrainingArguments(
         output_dir=OUTPUT_DIR,
@@ -112,15 +150,15 @@ def get_training_arguments(local_rank):
         save_total_limit=2,
         report_to="tensorboard",
         local_rank=local_rank,
-        remove_unused_columns=False,  # Fix ValueError for dataset columns
-        fsdp="full_shard auto_wrap",  # Enable FSDP
+        remove_unused_columns=False,
+        fsdp="full_shard auto_wrap",
         fsdp_config={
             "offload_to_cpu": True,
             "mixed_precision": True,
-            "activation_checkpointing": True,  # Enable activation checkpointing
         },
         ddp_find_unused_parameters=False
     )
+
 
 def main():
     local_rank = setup_distributed()
@@ -150,6 +188,7 @@ def main():
         tokenizer.save_pretrained(OUTPUT_DIR)
 
     dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()
