@@ -14,10 +14,11 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
     MixedPrecision,
-    StateDictType
+    ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import (
     transformer_auto_wrap_policy,
+    size_based_auto_wrap_policy,
     enable_wrap,
     wrap,
 )
@@ -56,55 +57,43 @@ def setup_model_and_tokenizer(local_rank):
     tokenizer.pad_token = tokenizer.eos_token
 
     print("Loading model...")
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float16,
-        low_cpu_mem_usage=True,
-    ).to(f"cuda:{local_rank}")
-
-    # Enable gradient checkpointing
-    model.gradient_checkpointing_enable()
-
-    # FSDP Wrapping
+    # FSDP 설정
     from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-    wrap_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={LlamaDecoderLayer}
-    )
 
+    # Mixed precision policy
     mixed_precision_policy = MixedPrecision(
         param_dtype=torch.float16,
-        reduce_dtype=torch.float16,
-        buffer_dtype=torch.float16
+        reduce_dtype=torch.float32,  # Changed to float32 for better stability
+        buffer_dtype=torch.float16,
     )
 
-    model = FSDP(
-        model,
-        auto_wrap_policy=wrap_policy,
-        mixed_precision=mixed_precision_policy,
-        cpu_offload=CPUOffload(offload_params=True),
-        device_id=torch.cuda.current_device(),
-    )
+    # FSDP Config
+    fsdp_config = {
+        "fsdp_auto_wrap_policy": transformer_auto_wrap_policy(transformer_layer_cls={LlamaDecoderLayer}),
+        "fsdp_backward_prefetch": "BACKWARD_POST",
+        "fsdp_cpu_offload": None,  # Disabled CPU offload for now
+        "fsdp_sharding_strategy": ShardingStrategy.FULL_SHARD,
+        "fsdp_mixed_precision": mixed_precision_policy,
+        "fsdp_state_dict_type": "FULL_STATE_DICT",
+    }
 
-    # Enable activation checkpointing after FSDP wrapping
-    from torch.distributed.fsdp import BackwardPrefetch
-    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        checkpoint_wrapper,
-        CheckpointImpl,
-    )
-    from functools import partial
+    # Load the model
+    with enable_wrap(wrapper_cls=FSDP, **fsdp_config):
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
+            use_cache=False,  # Important: disable KV cache
+        )
+        # Wrap the model
+        model = FSDP(
+            model,
+            device_id=torch.cuda.current_device(),
+            **fsdp_config
+        )
 
-    non_reentrant_wrapper = partial(
-        checkpoint_wrapper,
-        checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-    )
-
-    check_fn = lambda submodule: isinstance(submodule, LlamaDecoderLayer)
-    apply_fsdp_wrapper = lambda submodule: wrap(submodule, wrapper_cls=non_reentrant_wrapper)
-
-    model.apply(
-        lambda m: apply_fsdp_wrapper(m) if check_fn(m) else None
-    )
+    # Enable gradient checkpointing after FSDP wrapping
+    model.gradient_checkpointing_enable()
 
     return model, tokenizer
 
@@ -151,17 +140,15 @@ def get_training_arguments(local_rank):
         report_to="tensorboard",
         local_rank=local_rank,
         remove_unused_columns=False,
-        fsdp="full_shard auto_wrap",
-        fsdp_config={
-            "offload_to_cpu": True,
-            "mixed_precision": True,
-        },
-        ddp_find_unused_parameters=False
+        gradient_checkpointing=True,
+        ddp_find_unused_parameters=False,
+        dataloader_pin_memory=False,  # Added to prevent memory issues
     )
 
 
 def main():
     local_rank = setup_distributed()
+    torch.backends.cuda.matmul.allow_tf32 = True  # Added for better performance
 
     model, tokenizer = setup_model_and_tokenizer(local_rank)
     dataset = prepare_dataset(tokenizer)
