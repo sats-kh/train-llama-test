@@ -145,11 +145,6 @@ def get_training_arguments(local_rank):
         report_to="tensorboard",
         local_rank=local_rank,
         remove_unused_columns=False,
-        fsdp="full_shard auto_wrap",
-        fsdp_config={
-            "offload_to_cpu": False,
-            "mixed_precision": True,
-        },
         ddp_find_unused_parameters=False
     )
 
