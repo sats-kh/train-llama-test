@@ -3,16 +3,14 @@ import torch
 import torch.distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
+    StateDictType,
     MixedPrecision,
-    BackwardPrefetch,
     ShardingStrategy,
     CPUOffload
 )
 from torch.distributed.fsdp.wrap import (
-    transformer_auto_wrap_policy,
+    transformer_wrap_policy,
     size_based_auto_wrap_policy,
-    enable_wrap,
-    wrap
 )
 from transformers import (
     AutoModelForCausalLM,
@@ -72,20 +70,22 @@ def setup_model_and_tokenizer(local_rank):
     # FSDP CPU offload policy (optional)
     cpu_offload_policy = CPUOffload(offload_params=True)
 
-    # Auto wrap policy
-    auto_wrap_policy = transformer_auto_wrap_policy(
+    # Define wrapping policy
+    wrap_policy = transformer_wrap_policy(
         transformer_layer_cls={LlamaDecoderLayer},
     )
 
     # Initialize FSDP wrapped model
     model = FSDP(
         model,
-        auto_wrap_policy=auto_wrap_policy,
+        auto_wrap_policy=wrap_policy,
         mixed_precision=mixed_precision_policy,
         sharding_strategy=ShardingStrategy.FULL_SHARD,
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        cpu_offload=cpu_offload_policy,
         device_id=torch.cuda.current_device(),
+        cpu_offload=cpu_offload_policy,
+        sync_module_states=True,  # Ensure params are synced across ranks initially
+        forward_prefetch=True,  # Enable prefetching for better performance
+        limit_all_gathers=True  # Prevent memory spikes
     )
 
     model.gradient_checkpointing_enable()
@@ -138,6 +138,22 @@ def get_training_arguments(local_rank):
     )
 
 
+def save_model(model, tokenizer, output_dir):
+    """Save the FSDP model using state dict"""
+    # Switch to FULL_STATE_DICT for saving
+    full_state_dict = model.state_dict()
+
+    if dist.get_rank() == 0:
+        print("Saving model...")
+        # Create a config to save
+        config = model.module.config
+
+        # Save the model state dict
+        torch.save(full_state_dict, os.path.join(output_dir, "pytorch_model.bin"))
+        config.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
+
 def main():
     local_rank = setup_distributed()
 
@@ -163,12 +179,8 @@ def main():
     print("Starting training...")
     trainer.train()
 
-    if dist.get_rank() == 0:
-        print("Saving model...")
-        # Unwrap FSDP model before saving
-        unwrapped_model = trainer.model._wrapped_module
-        unwrapped_model.save_pretrained(OUTPUT_DIR)
-        tokenizer.save_pretrained(OUTPUT_DIR)
+    # Save model with proper FSDP state dict handling
+    save_model(trainer.model, tokenizer, OUTPUT_DIR)
 
     dist.destroy_process_group()
 
