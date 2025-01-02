@@ -13,6 +13,7 @@ from datasets import load_dataset
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, MixedPrecision
+from torch.distributed.fsdp.fully_sharded_data_parallel import ActivationCheckpointing
 from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B"
@@ -42,36 +43,33 @@ def setup_distributed():
 
 def setup_model_and_tokenizer(local_rank):
     print("Loading tokenizer...")
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer.pad_token = tokenizer.eos_token
 
-        print("Loading model...")
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.float16,
-            low_cpu_mem_usage=True,
-        ).to(f"cuda:{local_rank}")
+    print("Loading model...")
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True,
+    ).to(f"cuda:{local_rank}")
 
-        model.gradient_checkpointing_enable()
+    model.gradient_checkpointing_enable()
 
-        # FSDP Wrapping
-        wrap_policy = functools.partial(transformer_auto_wrap_policy, transformer_layer_cls={AutoModelForCausalLM})
-        mixed_precision_policy = MixedPrecision(
-            param_dtype=torch.float16,  # Parameters stored in fp16
-            reduce_dtype=torch.float16,  # Gradients reduced in fp16
-            buffer_dtype=torch.float16  # Buffers stored in fp16
-        )
+    # FSDP Wrapping
+    wrap_policy = functools.partial(transformer_auto_wrap_policy, transformer_layer_cls={AutoModelForCausalLM})
+    mixed_precision_policy = MixedPrecision(
+        param_dtype=torch.float16,  # Parameters stored in fp16
+        reduce_dtype=torch.float16,  # Gradients reduced in fp16
+        buffer_dtype=torch.float16  # Buffers stored in fp16
+    )
 
-        model = FSDP(
-            model,
-            auto_wrap_policy=wrap_policy,
-            mixed_precision=mixed_precision_policy,
-            cpu_offload=CPUOffload(offload_params=True)  # Optional CPU offloading
-        )
-    except Exception as e:
-        print(f"Error setting up model and tokenizer: {e}")
-        exit(1)
+    model = FSDP(
+        model,
+        auto_wrap_policy=wrap_policy,
+        mixed_precision=mixed_precision_policy,
+        cpu_offload=CPUOffload(offload_params=True),
+        activation_checkpointing=ActivationCheckpointing(policy="default")  # Enable activation checkpointing
+    )
     return model, tokenizer
 
 def prepare_dataset(tokenizer, max_length=512):
@@ -114,7 +112,7 @@ def get_training_arguments(local_rank):
         save_total_limit=2,
         report_to="tensorboard",
         local_rank=local_rank,
-        gradient_checkpointing=True,
+        remove_unused_columns=False,  # Keep all columns to avoid ValueError
         fsdp="full_shard auto_wrap",  # Enable FSDP
         ddp_find_unused_parameters=False
     )
