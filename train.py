@@ -60,14 +60,15 @@ def setup_model_and_tokenizer(local_rank):
     mixed_precision_config = MixedPrecision(
         param_dtype=torch.float16,  # Parameters in FP16
         reduce_dtype=torch.float16,  # Communication in FP16
-        buffer_dtype=torch.float16,  # Buffers in FP16
+        buffer_dtype=torch.float32,  # Buffers in FP32 to avoid mismatched gradients
     )
 
     # Wrap entire model manually with FSDP
     model = FSDP(
         model,
         device_id=local_rank,
-        mixed_precision=mixed_precision_config  # Pass mixed precision settings
+        mixed_precision=mixed_precision_config,  # Pass mixed precision settings
+        use_orig_params=True,  # Use original parameter representation to avoid gradient issues
     )
     return model, tokenizer
 
