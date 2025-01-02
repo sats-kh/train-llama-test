@@ -82,7 +82,7 @@ def setup_model_and_tokenizer(local_rank):
         model,
         auto_wrap_policy=wrap_policy,
         mixed_precision=mixed_precision_policy,
-        cpu_offload=CPUOffload(offload_params=True),
+        cpu_offload=CPUOffload(offload_params=False),
         device_id=torch.cuda.current_device(),
     )
 
