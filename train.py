@@ -118,7 +118,7 @@ def prepare_dataset(tokenizer, max_length=512):
 
     # Debug: Check dataset shape
     sample = tokenized_dataset[0]
-    print(f"Sample input_ids shape: {sample['input_ids'].shape}")
+    # print(f"Sample input_ids shape: {sample['input_ids'].shape}")
 
     return tokenized_dataset
 
