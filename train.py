@@ -89,15 +89,20 @@ def prepare_dataset(tokenizer, max_length=512):
     )
     return tokenized_dataset
 
-
 def train_model(model, dataloader, optimizer, epochs, rank):
     """Train the model using FSDP."""
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         for batch in tqdm(dataloader):
-            optimizer.zero_grad()
-            batch = {k: v.to(rank) for k, v in batch.items()}
+            # 디버깅: batch 구조 확인
+            if isinstance(batch, dict):
+                batch = {k: torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank) for k, v in batch.items()}
+            elif isinstance(batch, tuple):
+                batch = tuple(torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank) for v in batch)
+            else:
+                raise ValueError("Unsupported batch structure: expected dict or tuple")
 
+            optimizer.zero_grad()
             outputs = model(**batch)
             loss = outputs.loss
             loss.backward()
