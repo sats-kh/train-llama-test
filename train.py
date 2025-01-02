@@ -167,7 +167,8 @@ def main():
     model, tokenizer = setup_model_and_tokenizer(local_rank)
     dataset = prepare_dataset(tokenizer)
     training_args = get_training_arguments(local_rank)
-
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False
