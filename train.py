@@ -66,9 +66,7 @@ def prepare_model_and_tokenizer(local_rank):
     )
     return model, tokenizer
 
-
 def prepare_dataset(tokenizer, max_length=512):
-    """Tokenize dataset for training."""
     print("Loading and preparing dataset...")
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
 
@@ -78,7 +76,7 @@ def prepare_dataset(tokenizer, max_length=512):
             truncation=True,
             max_length=max_length,
             padding="max_length",
-            return_tensors="pt"
+            return_tensors="pt"  # 텐서로 반환
         )
 
     tokenized_dataset = dataset.map(
@@ -87,6 +85,7 @@ def prepare_dataset(tokenizer, max_length=512):
         remove_columns=dataset.column_names,
         num_proc=4
     )
+    print(f"Dataset features: {tokenized_dataset.features}")
     return tokenized_dataset
 
 
@@ -98,8 +97,12 @@ def train_model(model, dataloader, optimizer, epochs, rank):
             # 디버깅: batch 구조 확인
             print(f"Batch keys: {batch.keys() if isinstance(batch, dict) else type(batch)}")
 
-            # 데이터 GPU로 이동
-            batch = {k: v.to(rank) for k, v in batch.items()}  # 변환 없이 GPU로 이동
+            # 데이터 GPU로 이동 (필요하면 텐서로 변환)
+            for k, v in batch.items():
+                if not isinstance(v, torch.Tensor):
+                    batch[k] = torch.tensor(v, device=rank)  # 텐서로 변환 후 GPU로 이동
+                else:
+                    batch[k] = v.to(rank)  # GPU로 이동
 
             optimizer.zero_grad()
             outputs = model(**batch)
