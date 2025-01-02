@@ -3,14 +3,8 @@ import torch
 import torch.distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
+    FullStateDictConfig,
     StateDictType,
-    MixedPrecision,
-    ShardingStrategy,
-    CPUOffload
-)
-from torch.distributed.fsdp.wrap import (
-    transformer_wrap_policy,
-    size_based_auto_wrap_policy,
 )
 from transformers import (
     AutoModelForCausalLM,
@@ -19,7 +13,6 @@ from transformers import (
     TrainingArguments,
     DataCollatorForLanguageModeling
 )
-from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from datasets import load_dataset
 from datetime import timedelta
 
@@ -38,6 +31,8 @@ def setup_distributed():
         dist.init_process_group(
             backend="nccl",
             init_method="env://",
+            world_size=world_size,
+            rank=rank,
             timeout=timedelta(minutes=10)
         )
     except Exception as e:
@@ -60,35 +55,20 @@ def setup_model_and_tokenizer(local_rank):
         low_cpu_mem_usage=True,
     )
 
-    # FSDP mixed precision policy
-    mixed_precision_policy = MixedPrecision(
-        param_dtype=torch.float16,
-        reduce_dtype=torch.float16,
-        buffer_dtype=torch.float16
-    )
+    # 사용자 정의 FSDP 래핑 정책
+    def custom_auto_wrap_policy(module, recurse, nonwrapped_numel):
+        # torch.nn.Transformer 계층을 기준으로 래핑
+        if isinstance(module, torch.nn.Transformer):
+            return True
+        return False
 
-    # FSDP CPU offload policy (optional)
-    cpu_offload_policy = CPUOffload(offload_params=True)
-
-    # Define wrapping policy
-    wrap_policy = transformer_wrap_policy(
-        transformer_layer_cls={LlamaDecoderLayer},
-    )
-
-    # Initialize FSDP wrapped model
+    # 모델을 FSDP로 래핑
     model = FSDP(
         model,
-        auto_wrap_policy=wrap_policy,
-        mixed_precision=mixed_precision_policy,
-        sharding_strategy=ShardingStrategy.FULL_SHARD,
-        device_id=torch.cuda.current_device(),
-        cpu_offload=cpu_offload_policy,
-        sync_module_states=True,  # Ensure params are synced across ranks initially
-        forward_prefetch=True,  # Enable prefetching for better performance
-        limit_all_gathers=True  # Prevent memory spikes
+        auto_wrap_policy=custom_auto_wrap_policy,  # 사용자 정의 정책 적용
+        device_id=local_rank,
+        mixed_precision=torch.float16  # 메모리 최적화를 위한 혼합 정밀도 활성화
     )
-
-    model.gradient_checkpointing_enable()
     return model, tokenizer
 
 
@@ -128,37 +108,24 @@ def get_training_arguments(local_rank):
         logging_steps=100,
         save_steps=1000,
         fp16=True,
-        half_precision_backend="auto",
         push_to_hub=False,
         save_total_limit=2,
         report_to="tensorboard",
-        local_rank=local_rank,
-        gradient_checkpointing=True,
-        ddp_find_unused_parameters=False
+        ddp_find_unused_parameters=False,  # FSDP는 사용하지 않는 매개변수를 허용하지 않음
     )
 
 
-def save_model(model, tokenizer, output_dir):
-    """Save the FSDP model using state dict"""
-    # Switch to FULL_STATE_DICT for saving
-    full_state_dict = model.state_dict()
-
-    if dist.get_rank() == 0:
-        print("Saving model...")
-        # Create a config to save
-        config = model.module.config
-
-        # Save the model state dict
-        torch.save(full_state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-        config.save_pretrained(output_dir)
-        tokenizer.save_pretrained(output_dir)
+def save_model(model, tokenizer):
+    print("Saving model...")
+    state_dict_config = FullStateDictConfig(offload_to_cpu=True)
+    with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, state_dict_config):
+        state_dict = model.state_dict()
+        torch.save(state_dict, os.path.join(OUTPUT_DIR, "fsdp_model.pt"))
+    tokenizer.save_pretrained(OUTPUT_DIR)
 
 
 def main():
     local_rank = setup_distributed()
-
-    # Set device
-    torch.cuda.set_device(local_rank)
 
     model, tokenizer = setup_model_and_tokenizer(local_rank)
     dataset = prepare_dataset(tokenizer)
@@ -169,18 +136,17 @@ def main():
         mlm=False
     )
 
+    print("Starting training...")
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
     )
-
-    print("Starting training...")
     trainer.train()
 
-    # Save model with proper FSDP state dict handling
-    save_model(trainer.model, tokenizer, OUTPUT_DIR)
+    if dist.get_rank() == 0:
+        save_model(model, tokenizer)
 
     dist.destroy_process_group()
 
