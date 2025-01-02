@@ -89,14 +89,19 @@ def prepare_dataset(tokenizer, max_length=512):
     )
     return tokenized_dataset
 
+
 def train_model(model, dataloader, optimizer, epochs, rank):
     """Train the model using FSDP."""
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         for batch in tqdm(dataloader):
             # 디버깅: batch 구조 확인
+            print(f"Batch keys: {batch.keys() if isinstance(batch, dict) else type(batch)}")
+
+            # 데이터 정규화
             if isinstance(batch, dict):
-                batch = {k: torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank) for k, v in batch.items()}
+                batch = {k: (torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank))
+                         for k, v in batch.items()}
             elif isinstance(batch, tuple):
                 batch = tuple(torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank) for v in batch)
             else:
