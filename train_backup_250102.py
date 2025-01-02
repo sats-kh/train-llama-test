@@ -3,10 +3,17 @@ import torch
 import torch.distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
-    FullStateDictConfig,
-    StateDictType,
+    MixedPrecision,
+    BackwardPrefetch,
+    ShardingStrategy,
+    CPUOffload
 )
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import (
+    transformer_auto_wrap_policy,
+    size_based_auto_wrap_policy,
+    enable_wrap,
+    wrap
+)
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -14,6 +21,7 @@ from transformers import (
     TrainingArguments,
     DataCollatorForLanguageModeling
 )
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from datasets import load_dataset
 from datetime import timedelta
 
@@ -32,8 +40,6 @@ def setup_distributed():
         dist.init_process_group(
             backend="nccl",
             init_method="env://",
-            world_size=world_size,
-            rank=rank,
             timeout=timedelta(minutes=10)
         )
     except Exception as e:
@@ -56,17 +62,33 @@ def setup_model_and_tokenizer(local_rank):
         low_cpu_mem_usage=True,
     )
 
-    # Define a wrapping policy for transformers
-    def custom_auto_wrap_policy(module, recurse, nonwrapped_numel):
-        return isinstance(module, torch.nn.Transformer)
+    # FSDP mixed precision policy
+    mixed_precision_policy = MixedPrecision(
+        param_dtype=torch.float16,
+        reduce_dtype=torch.float16,
+        buffer_dtype=torch.float16
+    )
 
-    # Wrap model with FSDP
+    # FSDP CPU offload policy (optional)
+    cpu_offload_policy = CPUOffload(offload_params=True)
+
+    # Auto wrap policy
+    auto_wrap_policy = transformer_auto_wrap_policy(
+        transformer_layer_cls={LlamaDecoderLayer},
+    )
+
+    # Initialize FSDP wrapped model
     model = FSDP(
         model,
-        auto_wrap_policy=custom_auto_wrap_policy,
-        device_id=local_rank,
-        mixed_precision=torch.float16  # Enable mixed precision for memory efficiency
+        auto_wrap_policy=auto_wrap_policy,
+        mixed_precision=mixed_precision_policy,
+        sharding_strategy=ShardingStrategy.FULL_SHARD,
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        cpu_offload=cpu_offload_policy,
+        device_id=torch.cuda.current_device(),
     )
+
+    model.gradient_checkpointing_enable()
     return model, tokenizer
 
 
@@ -106,24 +128,21 @@ def get_training_arguments(local_rank):
         logging_steps=100,
         save_steps=1000,
         fp16=True,
+        half_precision_backend="auto",
         push_to_hub=False,
         save_total_limit=2,
         report_to="tensorboard",
-        ddp_find_unused_parameters=False,  # FSDP requires this to be False
+        local_rank=local_rank,
+        gradient_checkpointing=True,
+        ddp_find_unused_parameters=False
     )
-
-
-def save_model(model, tokenizer):
-    print("Saving model...")
-    state_dict_config = FullStateDictConfig(offload_to_cpu=True)
-    with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, state_dict_config):
-        state_dict = model.state_dict()
-        torch.save(state_dict, os.path.join(OUTPUT_DIR, "fsdp_model.pt"))
-    tokenizer.save_pretrained(OUTPUT_DIR)
 
 
 def main():
     local_rank = setup_distributed()
+
+    # Set device
+    torch.cuda.set_device(local_rank)
 
     model, tokenizer = setup_model_and_tokenizer(local_rank)
     dataset = prepare_dataset(tokenizer)
@@ -134,17 +153,22 @@ def main():
         mlm=False
     )
 
-    print("Starting training...")
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
     )
+
+    print("Starting training...")
     trainer.train()
 
     if dist.get_rank() == 0:
-        save_model(model, tokenizer)
+        print("Saving model...")
+        # Unwrap FSDP model before saving
+        unwrapped_model = trainer.model._wrapped_module
+        unwrapped_model.save_pretrained(OUTPUT_DIR)
+        tokenizer.save_pretrained(OUTPUT_DIR)
 
     dist.destroy_process_group()
 
