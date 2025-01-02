@@ -112,8 +112,13 @@ def get_training_arguments(local_rank):
         save_total_limit=2,
         report_to="tensorboard",
         local_rank=local_rank,
-        remove_unused_columns=False,  # Keep all columns to avoid ValueError
+        remove_unused_columns=False,  # Fix ValueError for dataset columns
         fsdp="full_shard auto_wrap",  # Enable FSDP
+        fsdp_config={
+            "offload_to_cpu": True,
+            "mixed_precision": True,
+            "activation_checkpointing": True,  # Enable activation checkpointing
+        },
         ddp_find_unused_parameters=False
     )
 
