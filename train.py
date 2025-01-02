@@ -9,35 +9,13 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 from datasets import load_dataset
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import auto_wrap_policy
+from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, MixedPrecision
 from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B"
 OUTPUT_DIR = "./llama-3.2-3b-finetuned"
-
-# DeepSpeed ZeRO config
-DEEPSPEED_CONFIG = {
-    "fp16": {
-        "enabled": True
-    },
-    "zero_optimization": {
-        "stage": 3,  # ZeRO Stage 3 for full memory optimization
-        "offload_optimizer": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "offload_param": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "overlap_comm": True,
-        "contiguous_gradients": True
-    },
-    "gradient_accumulation_steps": 8,
-    "train_micro_batch_size_per_gpu": 1,
-    "steps_per_print": 100,
-    "gradient_clipping": 1.0
-}
-
 
 def setup_distributed():
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -61,7 +39,6 @@ def setup_distributed():
     torch.cuda.set_device(local_rank)
     return local_rank
 
-
 def setup_model_and_tokenizer(local_rank):
     print("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -75,8 +52,21 @@ def setup_model_and_tokenizer(local_rank):
     ).to(f"cuda:{local_rank}")
 
     model.gradient_checkpointing_enable()
-    return model, tokenizer
 
+    # FSDP Wrapping
+    mixed_precision_policy = MixedPrecision(
+        param_dtype=torch.float16,  # Parameters stored in fp16
+        reduce_dtype=torch.float16,  # Gradients reduced in fp16
+        buffer_dtype=torch.float16  # Buffers stored in fp16
+    )
+
+    model = FSDP(
+        model,
+        auto_wrap_policy=auto_wrap_policy,
+        mixed_precision=mixed_precision_policy,
+        cpu_offload=CPUOffload(offload_params=True)  # Optional CPU offloading
+    )
+    return model, tokenizer
 
 def prepare_dataset(tokenizer, max_length=512):
     print("Loading and preparing dataset...")
@@ -101,7 +91,6 @@ def prepare_dataset(tokenizer, max_length=512):
     )
     return tokenized_dataset
 
-
 def get_training_arguments(local_rank):
     return TrainingArguments(
         output_dir=OUTPUT_DIR,
@@ -120,10 +109,13 @@ def get_training_arguments(local_rank):
         report_to="tensorboard",
         local_rank=local_rank,
         gradient_checkpointing=True,
-        deepspeed=DEEPSPEED_CONFIG,  # ZeRO Optimization 설정
+        fsdp="full_shard auto_wrap",  # Enable FSDP
+        fsdp_config={
+            "offload_to_cpu": True,
+            "mixed_precision": True,
+        },
         ddp_find_unused_parameters=False
     )
-
 
 def main():
     local_rank = setup_distributed()
@@ -153,7 +145,6 @@ def main():
         tokenizer.save_pretrained(OUTPUT_DIR)
 
     dist.destroy_process_group()
-
 
 if __name__ == "__main__":
     main()
