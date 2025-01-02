@@ -121,7 +121,7 @@ def prepare_dataset(tokenizer, max_length=512):
     # Debug: Ensure the dataset contains PyTorch tensors
     sample = tokenized_dataset[0]
     print(f"Sample input_ids type: {type(sample['input_ids'])}")
-    print(f"Sample input_ids shape: {sample['input_ids'].size()}")  # Using .size() for torch tensors
+    # print(f"Sample input_ids shape: {sample['input_ids'].size()}")  # Using .size() for torch tensors
 
     return tokenized_dataset
 
