@@ -1,7 +1,8 @@
 import os
 import torch
 import torch.distributed as dist
-import functools
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, FullStateDictConfig, StateDictType
+from torch.distributed.fsdp.wrap import auto_wrap_policy
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -10,18 +11,12 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 from datasets import load_dataset
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    CPUOffload,
-    MixedPrecision
-)
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B"
-OUTPUT_DIR = "./llama-3.2-3b-fsdp-finetuned"
+OUTPUT_DIR = "./llama-3.2-3b-finetuned"
 
-# 1. Distributed Setup
+
 def setup_distributed():
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
@@ -44,7 +39,7 @@ def setup_distributed():
     torch.cuda.set_device(local_rank)
     return local_rank
 
-# 2. Model and Tokenizer Setup
+
 def setup_model_and_tokenizer(local_rank):
     print("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -55,50 +50,18 @@ def setup_model_and_tokenizer(local_rank):
         MODEL_NAME,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
-    ).to(f"cuda:{local_rank}")
-
-    # Debug: Check embedding shape
-    print(f"Embedding weight shape before resizing: {model.model.embed_tokens.weight.shape}")
-    if model.config.vocab_size != len(tokenizer):
-        print(f"Resizing model embeddings from {model.config.vocab_size} to {len(tokenizer)}")
-        model.resize_token_embeddings(len(tokenizer))
-
-    # Ensure tokenizer and model vocab sizes match
-    if len(tokenizer) != model.config.vocab_size:
-        model.resize_token_embeddings(len(tokenizer))
-        print(f"Resized model vocab size: {model.config.vocab_size}")
-
-    print(f"Embedding weight shape after resizing: {model.model.embed_tokens.weight.shape}")
-
-    # Enable gradient checkpointing and disable use_cache for compatibility
-    model.gradient_checkpointing_enable()
-    model.config.use_cache = False
-
-    # FSDP Wrapping
-    from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-    wrap_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={LlamaDecoderLayer}
     )
 
-    mixed_precision_policy = MixedPrecision(
-        param_dtype=torch.float16,
-        reduce_dtype=torch.float16,
-        buffer_dtype=torch.float16
-    )
-
+    # Wrap model with FSDP
     model = FSDP(
         model,
-        auto_wrap_policy=wrap_policy,
-        mixed_precision=mixed_precision_policy,
-        cpu_offload=CPUOffload(offload_params=False),
-        use_orig_params=True,
-        device_id=torch.cuda.current_device(),
+        auto_wrap_policy=auto_wrap_policy,
+        mixed_precision=True,  # Enable mixed precision for memory efficiency
+        device_id=torch.cuda.current_device()
     )
-
     return model, tokenizer
 
-# 3. Dataset Preparation
+
 def prepare_dataset(tokenizer, max_length=512):
     print("Loading and preparing dataset...")
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
@@ -109,7 +72,9 @@ def prepare_dataset(tokenizer, max_length=512):
             truncation=True,
             max_length=max_length,
             padding="max_length",
-            return_tensors="pt"
+            return_tensors="pt",
+            return_attention_mask=True,
+            return_token_type_ids=False
         )
 
     tokenized_dataset = dataset.map(
@@ -118,15 +83,9 @@ def prepare_dataset(tokenizer, max_length=512):
         remove_columns=dataset.column_names,
         num_proc=4
     )
-
-    # Verify sample output
-    sample = tokenized_dataset[0]
-    print(f"Sample input_ids type: {type(sample['input_ids'])}")
-    print(f"Sample input_ids: {sample['input_ids']}")
-
     return tokenized_dataset
 
-# 4. Training Arguments
+
 def get_training_arguments(local_rank):
     return TrainingArguments(
         output_dir=OUTPUT_DIR,
@@ -139,16 +98,14 @@ def get_training_arguments(local_rank):
         logging_steps=100,
         save_steps=1000,
         fp16=True,
-        half_precision_backend="auto",
         push_to_hub=False,
         save_total_limit=2,
         report_to="tensorboard",
         local_rank=local_rank,
-        remove_unused_columns=False,
-        ddp_find_unused_parameters=False
+        gradient_checkpointing=True,
     )
 
-# 5. Main Training Loop
+
 def main():
     local_rank = setup_distributed()
 
@@ -161,23 +118,26 @@ def main():
         mlm=False
     )
 
+    # Save the model using FSDP state_dict
+    if dist.get_rank() == 0:
+        print("Saving model...")
+        state_dict_config = FullStateDictConfig(offload_to_cpu=True)
+        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, state_dict_config):
+            torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, "fsdp_model.pt"))
+
+        tokenizer.save_pretrained(OUTPUT_DIR)
+
+    print("Starting training...")
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
     )
-
-    print("Starting training...")
     trainer.train()
-
-    if dist.get_rank() == 0:
-        print("Saving model...")
-        trainer.save_model()
-        tokenizer.save_pretrained(OUTPUT_DIR)
 
     dist.destroy_process_group()
 
-# Entry Point
+
 if __name__ == "__main__":
     main()
