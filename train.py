@@ -82,7 +82,7 @@ def setup_model_and_tokenizer(local_rank):
         model,
         auto_wrap_policy=wrap_policy,
         mixed_precision=mixed_precision_policy,
-        cpu_offload=CPUOffload(offload_params=True),  # CPU 오프로드 활성화
+        cpu_offload=CPUOffload(offload_params=False),  # CPU 오프로드 활성화
         use_orig_params=True,  # 여기에서 전달
         device_id=torch.cuda.current_device(),
     )
@@ -154,7 +154,7 @@ def get_training_arguments(local_rank):
         remove_unused_columns=False,
         fsdp="full_shard auto_wrap",
         fsdp_config={
-            "offload_to_cpu": True,
+            "offload_to_cpu": False,
             "mixed_precision": True,
         },
         ddp_find_unused_parameters=False
