@@ -65,7 +65,6 @@ def prepare_model_and_tokenizer(local_rank):
         device_id=local_rank
     )
     return model, tokenizer
-
 def prepare_dataset(tokenizer, max_length=512):
     print("Loading and preparing dataset...")
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
@@ -87,20 +86,25 @@ def prepare_dataset(tokenizer, max_length=512):
     )
     print(f"Dataset features: {tokenized_dataset.features}")
     return tokenized_dataset
+
+
 def train_model(model, dataloader, optimizer, epochs, rank):
     """Train the model using FSDP."""
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         for batch in tqdm(dataloader):
             # 디버깅: batch 구조 확인
-            print(f"Batch keys: {batch.keys() if isinstance(batch, dict) else type(batch)}")
+            print({k: (type(v), v[:5] if isinstance(v, list) else v.shape if isinstance(v, torch.Tensor) else "N/A") for
+                   k, v in batch.items()})
 
             # 데이터 GPU로 이동
             for k, v in batch.items():
-                if isinstance(v, list):  # v가 list인 경우
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(rank)  # 이미 텐서인 경우
+                elif isinstance(v, list):  # 리스트인 경우
                     batch[k] = torch.tensor(v, dtype=torch.long).to(rank)
-                elif isinstance(v, torch.Tensor):  # v가 Tensor인 경우
-                    batch[k] = v.to(rank)
+                elif isinstance(v, np.ndarray):  # 넘파이 배열인 경우
+                    batch[k] = torch.from_numpy(v).to(rank)
                 else:
                     raise TypeError(f"Unsupported data type for batch key {k}: {type(v)}")
 
