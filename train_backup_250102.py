@@ -1,6 +1,12 @@
 import os
 import torch
 import torch.distributed as dist
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    FullStateDictConfig,
+    StateDictType,
+)
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -13,30 +19,6 @@ from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B"
 OUTPUT_DIR = "./llama-3.2-3b-finetuned"
-
-# DeepSpeed ZeRO config
-DEEPSPEED_CONFIG = {
-    "fp16": {
-        "enabled": True
-    },
-    "zero_optimization": {
-        "stage": 3,  # ZeRO Stage 3 for full memory optimization
-        "offload_optimizer": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "offload_param": {
-            "device": "cpu",
-            "pin_memory": True
-        },
-        "overlap_comm": True,
-        "contiguous_gradients": True
-    },
-    "gradient_accumulation_steps": 8,
-    "train_micro_batch_size_per_gpu": 1,
-    "steps_per_print": 100,
-    "gradient_clipping": 1.0
-}
 
 
 def setup_distributed():
@@ -72,9 +54,19 @@ def setup_model_and_tokenizer(local_rank):
         MODEL_NAME,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
-    ).to(f"cuda:{local_rank}")
+    )
 
-    model.gradient_checkpointing_enable()
+    # Define a wrapping policy for transformers
+    def custom_auto_wrap_policy(module, recurse, nonwrapped_numel):
+        return isinstance(module, torch.nn.Transformer)
+
+    # Wrap model with FSDP
+    model = FSDP(
+        model,
+        auto_wrap_policy=custom_auto_wrap_policy,
+        device_id=local_rank,
+        mixed_precision=torch.float16  # Enable mixed precision for memory efficiency
+    )
     return model, tokenizer
 
 
@@ -114,15 +106,20 @@ def get_training_arguments(local_rank):
         logging_steps=100,
         save_steps=1000,
         fp16=True,
-        half_precision_backend="auto",
         push_to_hub=False,
         save_total_limit=2,
         report_to="tensorboard",
-        local_rank=local_rank,
-        gradient_checkpointing=True,
-        deepspeed=DEEPSPEED_CONFIG,  # ZeRO Optimization 설정
-        ddp_find_unused_parameters=False
+        ddp_find_unused_parameters=False,  # FSDP requires this to be False
     )
+
+
+def save_model(model, tokenizer):
+    print("Saving model...")
+    state_dict_config = FullStateDictConfig(offload_to_cpu=True)
+    with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, state_dict_config):
+        state_dict = model.state_dict()
+        torch.save(state_dict, os.path.join(OUTPUT_DIR, "fsdp_model.pt"))
+    tokenizer.save_pretrained(OUTPUT_DIR)
 
 
 def main():
@@ -137,20 +134,17 @@ def main():
         mlm=False
     )
 
+    print("Starting training...")
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
     )
-
-    print("Starting training...")
     trainer.train()
 
     if dist.get_rank() == 0:
-        print("Saving model...")
-        trainer.save_model()
-        tokenizer.save_pretrained(OUTPUT_DIR)
+        save_model(model, tokenizer)
 
     dist.destroy_process_group()
 
