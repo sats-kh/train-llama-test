@@ -87,7 +87,6 @@ def prepare_dataset(tokenizer, max_length=512):
     )
     print(f"Dataset features: {tokenized_dataset.features}")
     return tokenized_dataset
-
 def train_model(model, dataloader, optimizer, epochs, rank):
     """Train the model using FSDP."""
     for epoch in range(epochs):
@@ -98,9 +97,9 @@ def train_model(model, dataloader, optimizer, epochs, rank):
 
             # 데이터 GPU로 이동
             for k, v in batch.items():
-                if isinstance(v, list) or isinstance(v, torch.Tensor):
+                if isinstance(v, list):  # v가 list인 경우
                     batch[k] = torch.tensor(v, dtype=torch.long).to(rank)
-                elif isinstance(v, torch.Tensor):
+                elif isinstance(v, torch.Tensor):  # v가 Tensor인 경우
                     batch[k] = v.to(rank)
                 else:
                     raise TypeError(f"Unsupported data type for batch key {k}: {type(v)}")
