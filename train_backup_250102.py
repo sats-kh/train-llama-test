@@ -17,7 +17,7 @@ from datasets import load_dataset
 from datetime import timedelta
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B"
-OUTPUT_DIR = "./llama-3.2-3b-finetuned"
+OUTPUT_DIR = "./llama-3.2-3b-fsdp-finetuned"
 
 
 def setup_distributed():
@@ -55,19 +55,11 @@ def setup_model_and_tokenizer(local_rank):
         low_cpu_mem_usage=True,
     )
 
-    # 사용자 정의 FSDP 래핑 정책
-    def custom_auto_wrap_policy(module, recurse, nonwrapped_numel):
-        # torch.nn.Transformer 계층을 기준으로 래핑
-        if isinstance(module, torch.nn.Transformer):
-            return True
-        return False
-
-    # 모델을 FSDP로 래핑
+    # Wrap entire model manually with FSDP
     model = FSDP(
         model,
-        auto_wrap_policy=custom_auto_wrap_policy,  # 사용자 정의 정책 적용
         device_id=local_rank,
-        mixed_precision=torch.float16  # 메모리 최적화를 위한 혼합 정밀도 활성화
+        mixed_precision=True  # Enable mixed precision
     )
     return model, tokenizer
 
@@ -111,7 +103,7 @@ def get_training_arguments(local_rank):
         push_to_hub=False,
         save_total_limit=2,
         report_to="tensorboard",
-        ddp_find_unused_parameters=False,  # FSDP는 사용하지 않는 매개변수를 허용하지 않음
+        ddp_find_unused_parameters=False,  # FSDP requires this to be False
     )
 
 
