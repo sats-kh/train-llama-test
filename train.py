@@ -59,6 +59,9 @@ def setup_model_and_tokenizer(local_rank):
 
     # Debug: Check embedding shape
     print(f"Embedding weight shape before resizing: {model.model.embed_tokens.weight.shape}")
+    if model.config.vocab_size != len(tokenizer):
+        print(f"Resizing model embeddings from {model.config.vocab_size} to {len(tokenizer)}")
+        model.resize_token_embeddings(len(tokenizer))
 
     # Ensure tokenizer and model vocab sizes match
     if len(tokenizer) != model.config.vocab_size:
@@ -101,7 +104,6 @@ def prepare_dataset(tokenizer, max_length=512):
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
 
     def tokenize_function(examples):
-        # Tokenize the text and ensure tensors are returned
         return tokenizer(
             examples["text"],
             truncation=True,
@@ -110,7 +112,6 @@ def prepare_dataset(tokenizer, max_length=512):
             return_tensors="pt"
         )
 
-    # Apply tokenization and return PyTorch tensors
     tokenized_dataset = dataset.map(
         tokenize_function,
         batched=True,
@@ -118,10 +119,10 @@ def prepare_dataset(tokenizer, max_length=512):
         num_proc=4
     )
 
-    # Debug: Ensure the dataset contains PyTorch tensors
+    # Verify sample output
     sample = tokenized_dataset[0]
     print(f"Sample input_ids type: {type(sample['input_ids'])}")
-    # print(f"Sample input_ids shape: {sample['input_ids'].size()}")  # Using .size() for torch tensors
+    print(f"Sample input_ids: {sample['input_ids']}")
 
     return tokenized_dataset
 
