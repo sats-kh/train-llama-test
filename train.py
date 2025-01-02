@@ -90,9 +90,10 @@ def prepare_dataset(tokenizer, max_length=512):
     tokenized_dataset = dataset.map(
         tokenize_function,
         batched=True,
-        remove_columns=dataset.column_names,
+        remove_columns=dataset.column_names,  # Remove original text column
         num_proc=4
     )
+    # Ensure the dataset has input_ids and attention_mask
     return tokenized_dataset
 
 
@@ -112,6 +113,7 @@ def get_training_arguments(local_rank):
         save_total_limit=2,
         report_to="tensorboard",
         ddp_find_unused_parameters=False,  # FSDP requires this to be False
+        remove_unused_columns=False  # Do not remove unused columns
     )
 
 
