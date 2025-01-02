@@ -98,14 +98,8 @@ def train_model(model, dataloader, optimizer, epochs, rank):
             # 디버깅: batch 구조 확인
             print(f"Batch keys: {batch.keys() if isinstance(batch, dict) else type(batch)}")
 
-            # 데이터 정규화
-            if isinstance(batch, dict):
-                batch = {k: (torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank))
-                         for k, v in batch.items()}
-            elif isinstance(batch, tuple):
-                batch = tuple(torch.tensor(v).to(rank) if isinstance(v, list) else v.to(rank) for v in batch)
-            else:
-                raise ValueError("Unsupported batch structure: expected dict or tuple")
+            # 데이터 GPU로 이동
+            batch = {k: v.to(rank) for k, v in batch.items()}  # 변환 없이 GPU로 이동
 
             optimizer.zero_grad()
             outputs = model(**batch)
@@ -114,7 +108,6 @@ def train_model(model, dataloader, optimizer, epochs, rank):
             optimizer.step()
 
         print(f"Epoch {epoch + 1} completed.")
-
 
 def main():
     local_rank, rank, world_size = setup_distributed()
