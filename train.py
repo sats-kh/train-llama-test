@@ -76,7 +76,7 @@ def prepare_dataset(tokenizer, max_length=512):
             truncation=True,
             max_length=max_length,
             padding="max_length",
-            return_tensors="pt"  # 텐서로 반환
+            return_tensors="pt"  # 텐서 형식 반환
         )
 
     tokenized_dataset = dataset.map(
@@ -88,7 +88,6 @@ def prepare_dataset(tokenizer, max_length=512):
     print(f"Dataset features: {tokenized_dataset.features}")
     return tokenized_dataset
 
-
 def train_model(model, dataloader, optimizer, epochs, rank):
     """Train the model using FSDP."""
     for epoch in range(epochs):
@@ -97,12 +96,14 @@ def train_model(model, dataloader, optimizer, epochs, rank):
             # 디버깅: batch 구조 확인
             print(f"Batch keys: {batch.keys() if isinstance(batch, dict) else type(batch)}")
 
-            # 데이터 GPU로 이동 (필요하면 텐서로 변환)
+            # 데이터 GPU로 이동
             for k, v in batch.items():
-                if not isinstance(v, torch.Tensor):
-                    batch[k] = torch.tensor(v, device=rank)  # 텐서로 변환 후 GPU로 이동
+                if isinstance(v, list) or isinstance(v, torch.Tensor):
+                    batch[k] = torch.tensor(v, dtype=torch.long).to(rank)
+                elif isinstance(v, torch.Tensor):
+                    batch[k] = v.to(rank)
                 else:
-                    batch[k] = v.to(rank)  # GPU로 이동
+                    raise TypeError(f"Unsupported data type for batch key {k}: {type(v)}")
 
             optimizer.zero_grad()
             outputs = model(**batch)
